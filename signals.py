@@ -2,7 +2,7 @@ import os
 import sys
 import random
 import numpy as np
-import matlab.engine
+from capy import *
 import scipy.sparse as sp
 from decimal import Decimal
 import matplotlib.pyplot as plt
@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 
 # An example waveform that is sparse in time over a one second period
-def sparse_gen(events, freq, fs=2e5, t=1.0, plot=False):
+def sparse_gen(events, freq, fs=4e3, t=0.5, plot=False):
 	
 
 	# define rectangular function centered at 0 with width equal to period
@@ -23,7 +23,7 @@ def sparse_gen(events, freq, fs=2e5, t=1.0, plot=False):
 	# generate signal with a single sinusoid of frequency freq
 	signal = np.zeros((len(time)))
 	for evnt in events:
-		signal += np.multiply(rect(1/freq, time-evnt),np.sin(2*np.pi*freq*(time-evnt)))
+		signal += np.multiply(rect(1/freq, time-evnt),-np.sin(2*np.pi*freq*(time-evnt)))
 
 	# plot the source signal if requested
 	if plot:
@@ -36,6 +36,25 @@ def sparse_gen(events, freq, fs=2e5, t=1.0, plot=False):
 
 	return time, signal
 
-sparse_gen([1e-1,3e-1,6e-1], freq=1000, plot=True)
+####################################################################
+########################### Example usage ##########################
+####################################################################
 
-#comp = CAOptimise(svector=signal(time).reshape([-1,1]), verbose=True, **user_vars)
+# generate an example sparse signal with len(events) signal events 
+time, signal = sparse_gen(events=[2.5e-1], freq=1000, plot=False)
+
+# define a measurement basis (random or fourier)
+transform = measure_gen(ovector=signal, time=time)
+
+# compute the signal that would be measured given the above original
+# and measurement basis
+svector = transform @ signal.T
+
+# store relevant parameters of problem 
+user_vars = {"transform": transform,
+			 "measurements": len(transform),
+			 "basis": "random",
+			 "epsilon": 0.01}
+####################################################################
+
+comp = CAOptimise(svector=svector, verbose=True, **user_vars)

@@ -2,32 +2,35 @@
 # @Author: Helios
 # @Date:   2018-04-24 11:26:02
 # @Last Modified by:   Spark
-# @Last Modified time: 2018-05-08 16:28:25
+# @Last Modified time: 2018-07-10 18:20:35
+
+# TODO 
+# replace matlab CVX with CVXOPT
+# remove all atomic physics stuff
 
 
 import os
 import sys
 import random
 import numpy as np
-import matlab.engine
+import cvxpy as cvx
 import scipy.sparse as sp
 from decimal import Decimal
 import matplotlib.pyplot as plt
+
 
 
 class CAOptimise(object):
     # class to handle compressive measuring with a suite of possible
     # experiment parameters
 
-    def __init__(self, svector, engine, verbose=False, **kwargs):
+    def __init__(self, svector, verbose=False, **kwargs):
         # the measured vector obtained from experiment
         self.svector = np.asarray(svector, dtype=np.float)
         # dimensionality of measurement basis
         self.mdim = len(self.svector)
         # check for verbosity level
         self.verbose = verbose
-        # store engine instance
-        self.engine = engine
         # sensing flags
         self.flags = []
 
@@ -38,103 +41,50 @@ class CAOptimise(object):
             self.opt_params[key] = value
 
 
-        # compute minimum number of measurements required to converge on
-        # perfect reconstruction
-        self.min_meas = np.ceil(2*self.opt_params["sparseness"]*np.log(
-            self.mdim/self.opt_params["sparseness"]) + 5*self.opt_params["sparseness"]/4, )
+        # # compute minimum number of measurements required to converge on
+        # # perfect reconstruction
+        # self.min_meas = np.ceil(2*self.opt_params["sparseness"]*np.log(
+        #     self.mdim/self.opt_params["sparseness"]) + 5*self.opt_params["sparseness"]/4, )
 
-        # default number of measurements to 10% over minimum number of
-        if "measurements" not in self.opt_params:
-            self.opt_params["measurements"] = int(self.min_meas*1.1)
+        # # default number of measurements to 10% over minimum number of
+        # if "measurements" not in self.opt_params:
+        #     self.opt_params["measurements"] = int(self.min_meas*1.1)
 
-        # verbosity
-        if self.verbose:
-            print("Minimum number of measurements for reconstruction: {}, Specified: {}".format(
-                self.min_meas, self.opt_params["measurements"]))
+        # # verbosity
+        # if self.verbose:
+        #     print("Minimum number of measurements for reconstruction: {}, Specified: {}".format(
+        #         self.min_meas, self.opt_params["measurements"]))
 
-        # generate measurement transform if not already defined using specified
-        # basis
-        if "transform" not in self.opt_params:
-            if self.verbose:
-                print("No transform specified, generating one with {} basis".format(
-                    self.opt_params["basis"]))
-            self.measure_gen()
+        # check for supplied measurement transform
+        if "transform" not in self.opt_params.keys():
+            raise KeyError("No transform specified, aborting")
         else:
             self.transform = self.opt_params["transform"]
 
-        # add specified noise
-        if self.opt_params["noise"]:
-            self.svector += self.opt_params["noise"]*np.random.rand(self.opt_params["length"], 1)
-        else:
-            # force noiseless convex optimisation
-            self.opt_params["epsilon"] = 0.0
-        
-        # generate measurement vector with specified noise
-        self.measurement = np.dot(self.transform, self.svector).T
-
-    # generates desired measurement basis set with given parameters
-    def measure_gen(self):
-
-        # pre-allocate transform matrix
-        transform = np.zeros(
-            (self.opt_params["measurements"], self.mdim), dtype=np.complex64)
-
-        if self.opt_params["basis"] == "random":
-            transform = 2*np.random.ranf(size=np.shape(transform))-1
-
-        elif self.opt_params["basis"] == "fourier":
-            # predefine measurement steps (we always assume a one second
-            # measurement period)
-            self.t = np.arange(0, self.opt_params["time"], 1/self.opt_params["fs"])
-
-            # generate random frequencies or use those in freq list
-            rand_flag = len(self.opt_params["freqs"]) < self.opt_params["measurements"]
-            # create storage container for selected indices
-            if not rand_flag:
-                self.rand_ints = []
-
-            self.opt_params["meas_freq"] = []
-            print(rand_flag)
-            for i in range(self.opt_params["measurements"]):
-                if rand_flag:
-                    # choose a random frequency over the given range
-                    freq = (self.opt_params["freqs"][1] - self.opt_params["freqs"][0])*np.random.ranf()+self.opt_params["freqs"][0]
-                else:
-                    # choose a random frequency in the provided set and save index of chosen int
-                    randint = np.random.randint(low=0, high=len(self.opt_params["freqs"]))
-                    # ensure frequency has not been chosen before (inefficient but in the scheme of things, unimportant)
-                    while randint in self.rand_ints:
-                        randint = np.random.randint(low=0, high=len(self.opt_params["freqs"]))
-                    # save chosen frequency
-                    self.rand_ints.append(randint)
-                    # add to set
-                    freq = self.opt_params["freqs"][randint]
-                # add frequency to selection
-                self.opt_params["meas_freq"].append(freq)
-                transform[i, :] = -np.sin(2*np.pi*freq*self.t) #np.imag(np.exp(-1j*2*np.pi*freq*self.t))
-
-        else:
-            print("unknown measurement basis specified: exiting ")
-            os._exit(1)
-        self.transform = transform
+        self.cvx_recon()
 
 
-    # method to compute pass optimisation problem to CVX
+    # method to perform optimisation
     def cvx_recon(self):
         # set cvx flag
         self.flags.append("cvx_recon")
 
-        if self.verbose: print("Performing optimisation using Matlab CVX")
-        # convert to compatible data structure
-        matlab_transform = matlab.double(self.transform.tolist(), is_complex=True)
+        
 
-        # generate noisy measured vector and convert to matlab type double
-        if self.opt_params["noise"]:
-            noisy = self.measurement.reshape([1,-1]) + self.opt_params[
-                "noise"]*np.random.rand(self.opt_params["measurements"], 1)
-            measurement = matlab.double(noisy.tolist(), is_complex=True)
-        else:
-            measurement = matlab.double(self.measurement.reshape([-1,1]).tolist(), is_complex=True)
+        # setup SDP using cvxpy
+        if self.verbose: print("Setting up convex optimisation problem")
+        A = self.transform 
+        b = self.svector
+        x = cvx.Variable(len(self.transform.T))
+        objective = cvx.Minimize(cvx.norm(x, 1))
+        constraints = [cvx.norm(A*x - b, 2) <= self.opt_params["epsilon"]]
+        prob = cvx.Problem(objective, constraints)
+
+        # solve 2nd order cone problem
+        if self.verbose: print("Solving LP using CVXOPT")
+        prob.solve()
+
+        exit()
 
         # compute reconstruction
         self.u_recon = np.asarray(self.engine.atomic_cvx(measurement, matlab_transform, self.opt_params["epsilon"]))
@@ -274,39 +224,52 @@ class CAOptimise(object):
         axx[1].set_xlabel("Time (s)")
         plt.show()
 
-    # stores an optimised object class in the archive
-    def hdf_flush(self, name=None, group="today"):
-        # get random seed of run
-        self.opt_params["random_seed"] = np.random.get_state()[1][0]
-        
-        if name==None:
-            name = "{}_{}_{}_{}".format(self.opt_params["basis"], 
-                                        self.opt_params["length"],
-                                        self.opt_params["measurements"],
-                                        self.opt_params["random_seed"])
 
-        # store attributes
-        attributes = [(key,val) for key,val in self.opt_params.items()]
+# generates desired measurement basis set with given parameters
+def measure_gen(ovector, time, basis="random", measurements=50):
 
-        # flush all relevant data sets to group
-        from archive_manager import data_flush
-        # signal vector and key attributes
-        data_flush(data=self.svector, group=group, name="{}/raw_signal".format(name), attrs=attributes)
-        # transform
-        data_flush(data=self.transform, group=group, name="{}/transform".format(name))
-        # measurement vector
-        data_flush(data=self.measurement, group=group, name="{}/measurement".format(name))
-        # cycle through flags
-        if 'cvx_recon' in self.flags:
-            # reconstructed signal
-            data_flush(data=self.u_recon, group=group, name="{}/u_recon".format(name))
-        if 'atomic' in self.flags:
-            # reconstructed matched filter
-            data_flush(data=self.template_recon, group=group, name="{}/matched_filter".format(name))
-        
+    # store signal vector dimension
+    mdim = len(ovector)
 
+    if basis == "random":
+        transform = 2*np.random.ranf(size=(measurements, mdim))-1
 
+    elif basis == "fourier":
+        # pre-allocate transform matrix
+        transform = np.zeros((measurements, mdim), dtype=float)
 
+        # predefine measurement steps (we always assume a one second
+        # measurement period)
+
+        # generate random frequencies or use those in freq list
+        rand_flag = len(self.opt_params["freqs"]) < self.opt_params["measurements"]
+        # create storage container for selected indices
+        if not rand_flag:
+            rand_ints = []
+
+        meas_freq = []
+        for i in range(self.opt_params["measurements"]):
+            if rand_flag:
+                # choose a random frequency over the given range
+                freq = (self.opt_params["freqs"][1] - self.opt_params["freqs"][0])*np.random.ranf()+self.opt_params["freqs"][0]
+            else:
+                # choose a random frequency in the provided set and save index of chosen int
+                randint = np.random.randint(low=0, high=len(self.opt_params["freqs"]))
+                # ensure frequency has not been chosen before (inefficient but in the scheme of things, unimportant)
+                while randint in self.rand_ints:
+                    randint = np.random.randint(low=0, high=len(self.opt_params["freqs"]))
+                # save chosen frequency
+                self.rand_ints.append(randint)
+                # add to set
+                freq = self.opt_params["freqs"][randint]
+            # add frequency to selection
+            self.opt_params["meas_freq"].append(freq)
+            transform[i, :] = -np.sin(2*np.pi*freq*self.t) #np.imag(np.exp(-1j*2*np.pi*freq*self.t))
+
+    else:
+        print("unknown measurement basis specified: exiting ")
+        os._exit(1)
+    return transform
 
 def pulse_gen(freq=1/2e-3, tau=[3.0], amp=1):
     """
