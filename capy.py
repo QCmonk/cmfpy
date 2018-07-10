@@ -7,18 +7,12 @@
 
 import os
 import sys
-import h5py
 import random
 import numpy as np
-import pandas as pd
 import matlab.engine
 import scipy.sparse as sp
 from decimal import Decimal
 import matplotlib.pyplot as plt
-
-#--------------------------------------------------------------------------
-# COMPLETED
-#--------------------------------------------------------------------------
 
 
 class CAOptimise(object):
