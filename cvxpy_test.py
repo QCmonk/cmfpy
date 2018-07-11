@@ -12,8 +12,6 @@ prob = cvx.Problem(obj, constraints)
 
 prob.solve()
 
-print("status:", prob.status)
-print("optimal value", prob.value)
-print("optimal var", x.value, y.value)
+
 
 # Works! Alright!

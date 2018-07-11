@@ -2,11 +2,10 @@
 # @Author: Helios
 # @Date:   2018-04-24 11:26:02
 # @Last Modified by:   Spark
-# @Last Modified time: 2018-07-10 18:20:35
+# @Last Modified time: 2018-07-11 14:35:27
 
 # TODO 
-# replace matlab CVX with CVXOPT
-# remove all atomic physics stuff
+# reexpress matched filter in terms of cvxpy
 
 
 import os
@@ -26,12 +25,14 @@ class CAOptimise(object):
 
     def __init__(self, svector, verbose=False, **kwargs):
         # the measured vector obtained from experiment
-        self.svector = np.asarray(svector, dtype=np.float)
+        self.svector = np.asarray(svector, dtype=np.float).reshape([1,-1])
         # dimensionality of measurement basis
         self.mdim = len(self.svector)
+        # dimensionality of signal basis
+        self.ndim = len(kwargs["transform"].T)
         # check for verbosity level
         self.verbose = verbose
-        # sensing flags
+        # sensing flags for debug purposes
         self.flags = []
 
         # extract keyword arguments after setting defaults
@@ -41,38 +42,21 @@ class CAOptimise(object):
             self.opt_params[key] = value
 
 
-        # # compute minimum number of measurements required to converge on
-        # # perfect reconstruction
-        # self.min_meas = np.ceil(2*self.opt_params["sparseness"]*np.log(
-        #     self.mdim/self.opt_params["sparseness"]) + 5*self.opt_params["sparseness"]/4, )
-
-        # # default number of measurements to 10% over minimum number of
-        # if "measurements" not in self.opt_params:
-        #     self.opt_params["measurements"] = int(self.min_meas*1.1)
-
-        # # verbosity
-        # if self.verbose:
-        #     print("Minimum number of measurements for reconstruction: {}, Specified: {}".format(
-        #         self.min_meas, self.opt_params["measurements"]))
-
         # check for supplied measurement transform
         if "transform" not in self.opt_params.keys():
             raise KeyError("No transform specified, aborting")
         else:
             self.transform = self.opt_params["transform"]
 
-        self.cvx_recon()
 
 
     # method to perform optimisation
     def cvx_recon(self):
-        # set cvx flag
-        self.flags.append("cvx_recon")
-
-        
+        # set cvx start flag
+        self.flags.append("cvx_recon_start")
 
         # setup SDP using cvxpy
-        if self.verbose: print("Setting up convex optimisation problem")
+        if self.verbose: print("Setting up problem")
         A = self.transform 
         b = self.svector
         x = cvx.Variable(len(self.transform.T))
@@ -81,90 +65,133 @@ class CAOptimise(object):
         prob = cvx.Problem(objective, constraints)
 
         # solve 2nd order cone problem
-        if self.verbose: print("Solving LP using CVXOPT")
+        if self.verbose: print("Solving using CVXOPT")
         prob.solve()
 
-        exit()
+        # print solution status
+        if self.verbose:   
+            print("Solution status:", prob.status)
+            print("Objective: ", prob.value)
 
+
+        # set cvx end flag
+        self.flags.append("cvx_recon_end")
         # compute reconstruction
-        self.u_recon = np.asarray(self.engine.atomic_cvx(measurement, matlab_transform, self.opt_params["epsilon"]))
-
+        self.u_recon = x.value
         # store error vector
-        self.u_error = self.svector-self.u_recon
+        self.u_error = self.transform @ self.u_recon - self.svector
         # compute error using both l1 and l2 norm
         self.metrics = {'l1': np.linalg.norm(self.u_error, ord=1), "l2": np.linalg.norm(self.u_error, ord=2)}
 
+################################################################################################################
+
     # find time index of most prominent spike using python optimisation
-    def py_match(self, time, power=1):
+    def py_match(self, power=1, osignal=None, plot=False):
+        # ensure a template has been provided
+        if "template" not in self.opt_params.keys():
+            raise(KeyError, "No template provided for matched filter")
+
         # set single shot matched filter flag
-        self.flags.append("matched")
-
+        self.flags.append("comp_match_single_start")
         # set time range
-        tau_range = np.arange(0, self.opt_params["time"], 1/self.opt_params["fs"])
+        tau_range = self.opt_params["time"]
 
-        if self.verbose: print("Performing compressive matched filtering")
-
-        # generate noisy measured vector and convert to matlab type double
-        if self.opt_params["noise"]:
-            self.measurement = (np.dot(self.transform, self.svector) + self.opt_params["noise"]*np.random.rand(self.opt_params["measurements"], 1)).T
-        else:
-            self.opt_params["epsilon"] = 0.0
-            self.measurement = np.dot(self.transform, self.svector).T
+        # status message
+        if self.verbose: print("Performing compressive matched filtering of single spike")
 
         # define autocorrelation function
-        tau_match = lambda tau: np.abs(self.measurement.dot(self.transform.dot(self._sig_shift(self.opt_params["template"], tau))))
-        self.correlation = np.zeros((self.mdim,))
+        tau_match = lambda tau_int: np.abs(self.svector @ self.transform @ self.sig_shift(self.opt_params["template"], tau_int))
+        
+        # preallocate correlation vector
+        self.correlation = np.zeros((self.ndim,))
         for step, tau in enumerate(tau_range):
-            self.correlation[step] = tau_match(tau)**power
+            # compute correlation given some time shift of template vector
+            self.correlation[step] = tau_match(step)**power
 
-        # plot correlation
-        fig, axx = plt.subplots(2, sharex=True)
-        axx[1].plot(tau_range, self.correlation/np.max(self.correlation), 'r')
-        axx[0].grid(True)
-        axx[0].set_title("Correlation using neural template")
-        axx[1].set_xlabel("Time (s)")
-        axx[0].plot(time, self.svector)
-        axx[1].grid(True)
-        plt.show()
+        # set single shot matched filter flag
+        self.flags.append("comp_match_single_end")
+
+        # plot correlation if requested against original signal if supplied
+        if plot:
+            if osignal is not None:
+                fig, axx = plt.subplots(2, sharex=True)
+                axx[1].plot(tau_range, self.correlation, 'r')
+                axx[0].grid(True)
+                axx[0].set_title("Correlation using template")
+                axx[1].set_xlabel("Time (s)")
+                axx[0].plot(tau_range, osignal)
+                axx[1].grid(True)
+                plt.show()
+            else:
+                plt.plot(tau_range, self.correlation, 'r')
+                plt.title("Correlation using template")
+                plt.xlabel("Time (s)")
+                plt.ylabel("Correlation")
+                plt.grid(True)
+                plt.show()
 
 
-    # computes the position of 
-    def py_notch_match(self, power=1, max_spikes=1):
-        self.flags.append('atomic')
+    # performs multi-event compressive sampling
+    def py_notch_match(self, osignal=None, max_spikes=1, plot=False):
+        # set multi match start
+        self.flags.append('comp_match_multi_start')
 
         if self.verbose: print("Performing compressive matched filtering")
 
-        # define nuke function
-        self.nuke = np.ones((self.mdim,1), dtype=float)
+        # define notch function
+        self.notch = np.ones((self.ndim,1), dtype=float)
+        # time period to shift over
+        tau_range = self.opt_params["time"]
         # define autocorrelation function
-        tau_match = lambda template, tau: np.abs(np.real(self.measurement.dot(self.transform.dot(np.multiply(self.nuke, self._sig_shift(template, tau))))))
+        tau_match = lambda tau_int: np.abs(self.svector @ self.transform @ np.multiply(self.notch ,self.sig_shift(self.opt_params["template"], tau_int)))
         
         spike = 0
-        self.template_recon = np.zeros((self.mdim, 1))
+        self.template_recon = np.zeros((self.ndim, 1))
         while spike < max_spikes:
+            # iterate the number of spikes
             spike += 1
 
             # compute correlation function over parameter space
-            self.correlation = np.zeros((self.mdim,), dtype=np.complex64)
-            for step, tau in enumerate(np.arange(0, self.opt_params["time"], 1/self.opt_params["fs"])):
-                test = self.transform.dot(np.multiply(self.nuke, self._sig_shift(self.opt_params["template"], tau)))
-                self.correlation[step] = tau_match(self.opt_params["template"], tau)**power
+            self.correlation = np.zeros((self.ndim,), dtype=float)
+            for step, tau in enumerate(tau_range):
+                # test = self.transform @ np.multiply(self.notch, self.sig_shift(self.opt_params["template"], step))
+                self.correlation[step] = tau_match(step)
 
             # extract maximum peak
             max_ind = np.argmax(a=self.correlation)
             # add peak to vector nuke
-            self.nuke[max_ind-len(self.opt_params["template"]):max_ind+2*len(self.opt_params["template"])] = 0
+            self.notch[max_ind-len(self.opt_params["template"]):max_ind+2*len(self.opt_params["template"])] = 0
             # subtract template from measurement vector
-            #self.measurement -= self.transform.dot(self._sig_shift(self.opt_params["template"], max_ind/self.opt_params["fs"])).T
-            self.template_recon += self._sig_shift(self.opt_params["template"], max_ind/self.opt_params["fs"]).reshape([-1, 1])
+            self.template_recon += self.sig_shift(self.opt_params["template"], max_ind).reshape([-1, 1])
+
+        self.flags.append('comp_match_multi_end')
 
         # compute error
-        self.m_error = self.svector-self.template_recon
+        self.m_error = self.svector-self.transform @ self.template_recon
         # compute errors
         self.metrics = {'l1': np.linalg.norm(self.m_error, ord=1), "l2": np.linalg.norm(self.m_error, ord=2)}
 
+        # plot reconstruction if requested
+        if plot:
+            if osignal is not None:
+                fig, axx = plt.subplots(2, sharex=True)
+                axx[1].plot(tau_range, self.notch, 'r')
+                axx[0].grid(True)
+                axx[0].set_title("Multievent reconstruction")
+                axx[1].set_xlabel("Time (s)")
+                axx[0].plot(tau_range, osignal)
+                axx[1].grid(True)
+                plt.show()
+            else:
+                plt.plot(tau_range, self.template_recon, 'r')
+                plt.title("Correlation using template")
+                plt.xlabel("Time (s)")
+                plt.ylabel("Correlation")
+                plt.grid(True)
+                plt.show()
 
-    # comptues an estimate for the amplitude given the best guess 
+
+    # computes an estimate for the amplitude given the best guess 
     def amp_get(self, max_ind, template):
         # should we use the full reconstruction or just the single spike?
         waveform = self._sig_shift(template, max_ind/self.opt_params["fs"]).reshape([-1, 1])
@@ -175,18 +202,17 @@ class CAOptimise(object):
         return wave_amp
 
     # shifts signal vector by tau
-    def _sig_shift(self, template, tau):
+    def sig_shift(self, template, tau_int):
         # create zeroed vector (inefficent!)
-        shift = np.zeros((self.mdim,1))
-        int_pos = int(np.round(tau*self.opt_params["fs"]))
+        shift = np.zeros((self.ndim,1))
         temp_len = len(template)
         # force clipping
-        if int_pos < 0:
+        if tau_int < 0:
             int_pos = 0
-        elif int_pos > self.mdim - temp_len:
-            int_pos = int(self.mdim - temp_len)
+        elif tau_int > self.ndim - temp_len:
+            tau_int = int(self.ndim - temp_len)
         # shift vector by specified amount
-        shift[int_pos: int_pos + temp_len] = template.reshape([-1,1]) 
+        shift[tau_int: tau_int + temp_len] = template.reshape([-1,1]) 
 
         return shift
 
@@ -226,7 +252,7 @@ class CAOptimise(object):
 
 
 # generates desired measurement basis set with given parameters
-def measure_gen(ovector, time, basis="random", measurements=50):
+def measure_gen(ovector, time, basis="random", measurements=100):
 
     # store signal vector dimension
     mdim = len(ovector)
@@ -270,30 +296,3 @@ def measure_gen(ovector, time, basis="random", measurements=50):
         print("unknown measurement basis specified: exiting ")
         os._exit(1)
     return transform
-
-def pulse_gen(freq=1/2e-3, tau=[3.0], amp=1):
-    """
-    generates a multipulse magnetic field signal
-    """
-
-    # define box function
-    def box(t, start, end):
-        if type(t) is not list or type(t) is not np.array:
-            t = np.asarray(t)
-        return (t > start) & (t < end)
-
-    # define sum function method
-    def sig_sum(t, terms):
-        return sum(f(t) for f in terms)
-
-    # list to hold spike function
-    terms = []
-
-    for time in tau:
-        # generate sin template vector
-        terms.append(lambda t, tau=time: box(t, tau, tau + 1/freq)*amp*np.sin(2*np.pi*freq*(t-tau)))
-   
-    signal = lambda t, funcs=terms: sig_sum(t, funcs)
-
-    # return generated signal function, template used and time vector
-    return signal
