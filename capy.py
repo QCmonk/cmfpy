@@ -1,13 +1,3 @@
-# -*- coding: utf-8 -*-
-# @Author: Helios
-# @Date:   2018-04-24 11:26:02
-# @Last Modified by:   Spark
-# @Last Modified time: 2018-07-11 14:35:27
-
-# TODO 
-# reexpress matched filter in terms of cvxpy
-
-
 import os
 import sys
 import random
@@ -20,24 +10,57 @@ import matplotlib.pyplot as plt
 
 
 class CAOptimise(object):
-    # class to handle compressive measuring with a suite of possible
-    # experiment parameters
+    """
+    Class definition that handles signal reconstruction of a transformed input signal given
+    the measurement basis. Able to perform standard compressed sensing and compressive 
+    matched filter processing. 
 
-    def __init__(self, svector, verbose=False, **kwargs):
+    Parameters
+    ----------
+    svector : one dimensional numpy array
+        the sensing or measurement vector y such that y = Ax where 
+        x is the signal to reconstruct.
+
+    transform : m*n array where m is len(svector) and n is the 
+                dimension of the signal to reconstruct.
+
+    verbose : boolean 
+        Whether to print progress reports as reconstruction is performed.
+
+    kwargs : optional
+        "template": None,       (template signal for matched filtering)
+        "epsilon": 0.01         (radius of hyperdisc for CVX problem)
+        "length": len(svector) 
+        Optional arguments - some are required for different functionality
+
+
+    Returns
+    -------
+    CAOptimise class instance
+
+    Raises
+    ------
+    KeyError
+        If no measurement transform has been specified.
+    """
+
+    def __init__(self, svector, transform, verbose=False, **kwargs):
         # the measured vector obtained from experiment
         self.svector = np.asarray(svector, dtype=np.float).reshape([1,-1])
         # dimensionality of measurement basis
         self.mdim = len(self.svector)
         # dimensionality of signal basis
-        self.ndim = len(kwargs["transform"].T)
+        self.ndim = len(transform.T)
         # check for verbosity level
         self.verbose = verbose
         # sensing flags for debug purposes
         self.flags = []
 
         # extract keyword arguments after setting defaults
-        self.opt_params = {"basis": 'random', "sparsity": 0.1,
-                           "epsilon": 0.01, "freqs": [1e2, 1e3], "length": len(self.svector)}
+        self.opt_params = {"template": None,
+                           "epsilon": 0.01, 
+                           "transform": transform
+                           "length": len(self.svector)}
         for key, value in kwargs.items():
             self.opt_params[key] = value
 
@@ -49,19 +72,30 @@ class CAOptimise(object):
             self.transform = self.opt_params["transform"]
 
 
-
-    # method to perform optimisation
     def cvx_recon(self):
+        """
+        Sets up optimisation problem and computes x such that: transform*x - svector = 0.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        u_recon : one dimensional numpy array 
+            Vector that optimises the compressive sensing problem. 
+        """
+
         # set cvx start flag
         self.flags.append("cvx_recon_start")
 
-        # setup SDP using cvxpy
+        # setup SDP for Ax-b=0 using cvxpy 
         if self.verbose: print("Setting up problem")
         A = self.transform 
         b = self.svector
         x = cvx.Variable(len(self.transform.T))
         objective = cvx.Minimize(cvx.norm(x, 1))
-        constraints = [cvx.norm(A*x - b, 2) <= self.opt_params["epsilon"]]
+        constraints = [cvx.norm(A*x - b.T, 2) <= self.opt_params["epsilon"]]
         prob = cvx.Problem(objective, constraints)
 
         # solve 2nd order cone problem
@@ -83,13 +117,38 @@ class CAOptimise(object):
         # compute error using both l1 and l2 norm
         self.metrics = {'l1': np.linalg.norm(self.u_error, ord=1), "l2": np.linalg.norm(self.u_error, ord=2)}
 
-################################################################################################################
+        return self.u_recon
 
     # find time index of most prominent spike using python optimisation
-    def py_match(self, power=1, osignal=None, plot=False):
+    def py_match(self osignal=None, plot=False):
+        """
+        Performs single pass matched filtering using a measurement basis transform
+
+        Parameters
+        ----------
+        osignal : one dimensional numpy array
+            The original signal that is being reconstruced, used for fidelity testing
+        
+        plot : Boolean  
+            the 2nd param
+        third : {'value', 'other'}, optional
+            the 3rd param, by default 'value'
+
+        Returns
+        -------
+        string
+            a value in a string
+
+        Raises
+        ------
+        KeyError
+            when a key error
+        OtherError
+            when an other error
+        """
         # ensure a template has been provided
-        if "template" not in self.opt_params.keys():
-            raise(KeyError, "No template provided for matched filter")
+        if self.opt_params["template"] is None:
+            raise(AttributeError, "No template provided for matched filter")
 
         # set single shot matched filter flag
         self.flags.append("comp_match_single_start")
@@ -133,6 +192,35 @@ class CAOptimise(object):
 
     # performs multi-event compressive sampling
     def py_notch_match(self, osignal=None, max_spikes=1, plot=False):
+        """
+        My numpydoc description of a kind
+        of very exhautive numpydoc format docstring.
+
+        Parameters
+        ----------
+        first : array_like
+            the 1st param name `first`
+        second :
+            the 2nd param
+        third : {'value', 'other'}, optional
+            the 3rd param, by default 'value'
+
+        Returns
+        -------
+        string
+            a value in a string
+
+        Raises
+        ------
+        KeyError
+            when a key error
+        OtherError
+            when an other error
+        """
+        # ensure a template has been provided
+        if self.opt_params["template"] is None:
+            raise(AttributeError, "No template provided for matched filter")
+
         # set multi match start
         self.flags.append('comp_match_multi_start')
 
@@ -191,19 +279,35 @@ class CAOptimise(object):
                 plt.show()
 
 
-    # computes an estimate for the amplitude given the best guess 
-    def amp_get(self, max_ind, template):
-        # should we use the full reconstruction or just the single spike?
-        waveform = self._sig_shift(template, max_ind/self.opt_params["fs"]).reshape([-1, 1])
-        # compute estimated amplitude
-        t_waveform = self.transform.dot(waveform)
-        print(np.shape(self.measurement))
-        wave_amp = self.measurement.dot(t_waveform)/(np.linalg.norm(t_waveform ,2)**2)
-        return wave_amp
-
     # shifts signal vector by tau
     def sig_shift(self, template, tau_int):
-        # create zeroed vector (inefficent!)
+        """
+        My numpydoc description of a kind
+        of very exhautive numpydoc format docstring.
+
+        Parameters
+        ----------
+        first : array_like
+            the 1st param name `first`
+        second :
+            the 2nd param
+        third : {'value', 'other'}, optional
+            the 3rd param, by default 'value'
+
+        Returns
+        -------
+        string
+            a value in a string
+
+        Raises
+        ------
+        KeyError
+            when a key error
+        OtherError
+            when an other error
+        """
+
+        # create zeroed vector
         shift = np.zeros((self.ndim,1))
         temp_len = len(template)
         # force clipping
@@ -216,9 +320,32 @@ class CAOptimise(object):
 
         return shift
 
-    # basic plot code for the reconstructed signal
     def plot_recon(self, time):
+        """
+        My numpydoc description of a kind
+        of very exhautive numpydoc format docstring.
 
+        Parameters
+        ----------
+        first : array_like
+            the 1st param name `first`
+        second :
+            the 2nd param
+        third : {'value', 'other'}, optional
+            the 3rd param, by default 'value'
+
+        Returns
+        -------
+        string
+            a value in a string
+
+        Raises
+        ------
+        KeyError
+            when a key error
+        OtherError
+            when an other error
+        """
         print(np.shape(time), np.shape(self.u_recon))
         plt.plot(time, self.svector, color="r", label='Original')
         plt.plot(time, self.u_recon, 'g', label='Reconstruction')
@@ -235,6 +362,31 @@ class CAOptimise(object):
 
     # plot the results of the notched matched filter
     def notch_match_plot(self, time):
+        """
+        My numpydoc description of a kind
+        of very exhautive numpydoc format docstring.
+
+        Parameters
+        ----------
+        first : array_like
+            the 1st param name `first`
+        second :
+            the 2nd param
+        third : {'value', 'other'}, optional
+            the 3rd param, by default 'value'
+
+        Returns
+        -------
+        string
+            a value in a string
+
+        Raises
+        ------
+        KeyError
+            when a key error
+        OtherError
+            when an other error
+        """
         fig, axx = plt.subplots(2, sharex=True)
         l1, = axx[0].plot(time, self.template_recon, 'g')
         axx[0].grid(True)
@@ -250,9 +402,89 @@ class CAOptimise(object):
         axx[1].set_xlabel("Time (s)")
         plt.show()
 
+# An example waveform that is sparse in time over a one second period
+def sparse_gen(events, freq, fs=4e3, t=10, plot=False):
+    """
+    My numpydoc description of a kind
+    of very exhautive numpydoc format docstring.
+
+    Parameters
+    ----------
+    first : array_like
+        the 1st param name `first`
+    second :
+        the 2nd param
+    third : {'value', 'other'}, optional
+        the 3rd param, by default 'value'
+
+    Returns
+    -------
+    string
+        a value in a string
+
+    Raises
+    ------
+    KeyError
+        when a key error
+    OtherError
+        when an other error
+    """
+
+    # define rectangular function centered at 0 with width equal to period
+    def rect(period, time):
+        return np.where(np.abs(time) <= period/2, 1, 0)
+
+    # initialise time vector
+    time = np.arange(0,t,1/fs)
+
+    # generate signal with a single sinusoid of frequency freq
+    signal = np.zeros((len(time)))
+    for evnt in np.random.choice(time, size=events):
+        signal += np.multiply(rect(1/freq, time-evnt),-np.sin(2*np.pi*freq*(time-evnt)))
+
+    # generate template signal for match
+    t = np.arange(0, 1/freq, 1/fs)
+    template = np.sin(2*np.pi*freq*t)
+
+    # plot the source signal if requested
+    if plot:
+        plt.plot(time, signal, 'r--')
+        plt.xlabel("Time (s)")
+        plt.ylabel("Amplitude")
+        plt.title("Initial sparse signal")
+        plt.grid(True)
+        plt.show()
+
+    return time, signal, template
+
 
 # generates desired measurement basis set with given parameters
 def measure_gen(ovector, time, basis="random", measurements=100):
+    """
+    My numpydoc description of a kind
+    of very exhautive numpydoc format docstring.
+
+    Parameters
+    ----------
+    first : array_like
+        the 1st param name `first`
+    second :
+        the 2nd param
+    third : {'value', 'other'}, optional
+        the 3rd param, by default 'value'
+
+    Returns
+    -------
+    string
+        a value in a string
+
+    Raises
+    ------
+    KeyError
+        when a key error
+    OtherError
+        when an other error
+    """
 
     # store signal vector dimension
     mdim = len(ovector)
