@@ -22,7 +22,7 @@ transform = measure_gen(ovector=signal, time=time, basis="random")
 
 # compute the signal that would be measured given the above original
 # and measurement basis
-svector = transform @ signal.T
+svector = transform @ signal.T + np.random.normal(0,0.1, len(transform))
 
 # store relevant parameters of problem 
 user_vars = {
@@ -39,4 +39,5 @@ user_vars = {
 
 comp = CAOptimise(svector=svector, transform=transform, verbose=True, **user_vars)
 recon = comp.cvx_recon()
+comp.plot_recon(signal)
 #comp.py_notch_match(osignal=signal , plot=True, max_spikes=3)

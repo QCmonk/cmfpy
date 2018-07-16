@@ -59,7 +59,7 @@ class CAOptimise(object):
         # extract keyword arguments after setting defaults
         self.opt_params = {"template": None,
                            "epsilon": 0.01, 
-                           "transform": transform
+                           "transform": transform,
                            "length": len(self.svector)}
         for key, value in kwargs.items():
             self.opt_params[key] = value
@@ -120,7 +120,7 @@ class CAOptimise(object):
         return self.u_recon
 
     # find time index of most prominent spike using python optimisation
-    def py_match(self osignal=None, plot=False):
+    def py_match(self, osignal=None, plot=False):
         """
         Performs single pass matched filtering using a measurement basis transform
 
@@ -320,7 +320,7 @@ class CAOptimise(object):
 
         return shift
 
-    def plot_recon(self, time):
+    def plot_recon(self, original):
         """
         My numpydoc description of a kind
         of very exhautive numpydoc format docstring.
@@ -346,14 +346,9 @@ class CAOptimise(object):
         OtherError
             when an other error
         """
-        print(np.shape(time), np.shape(self.u_recon))
-        plt.plot(time, self.svector, color="r", label='Original')
-        plt.plot(time, self.u_recon, 'g', label='Reconstruction')
-        plt.title("Samples: {}, Measurements: {}, Basis: {}, Noise Amplitude: {}, ||Ax - b||_2 = {:2e}".format(self.opt_params["length"],
-                                                                                       self.opt_params["measurements"],
-                                                                                       self.opt_params["basis"],
-                                                                                       self.opt_params["noise"],
-                                                                                       self.metrics["l2"]))
+        plt.plot(self.opt_params["time"], original, color="r", label='Original')
+        plt.plot(self.opt_params["time"], self.u_recon, 'b--', label='Reconstruction')
+        plt.title("Compressive sampling reconstruction ")
         plt.grid(True)
         plt.ylabel("Amplitude")
         plt.xlabel("Time (s)")
