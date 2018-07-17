@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 # TODO
 # adaptive template update preprocess
 # threshold limit for spike matching
+# update measure_gen with fourier measurement
 
 
 
@@ -166,7 +167,7 @@ class CAOptimise(object):
         self.correlation = np.zeros((self.ndim,))
         for step, tau in enumerate(tau_range):
             # compute correlation given some time shift of template vector
-            self.correlation[step] = tau_match(step)**power
+            self.correlation[step] = tau_match(step)
 
         # set single shot matched filter flag
         self.flags.append("comp_match_single_end")
@@ -190,7 +191,7 @@ class CAOptimise(object):
                 plt.grid(True)
                 plt.show()
 
-        return correlation
+        return self.correlation
 
     def py_notch_match(self, osignal=None, max_spikes=1, plot=False):
         """
@@ -247,6 +248,9 @@ class CAOptimise(object):
             for step, tau in enumerate(tau_range):
                 # test = self.transform @ np.multiply(self.notch, self.sig_shift(self.opt_params["template"], step))
                 self.correlation[step] = tau_match(step)
+
+            #plt.plot(self.correlation)
+            #plt.show()
 
             # extract maximum peak
             max_ind = np.argmax(a=self.correlation)
@@ -443,7 +447,7 @@ def sparse_gen(events, freq, fs=4e3, t=10, plot=False):
     return time, signal, template
 
 
-def measure_gen(ndim, time, basis="random", measurements=100):
+def measure_gen(ndim, time, basis="random", measurements=100, freqs=[100,1000]):
     """
     Generates desired measurement basis set with given parameters.
 
@@ -459,7 +463,10 @@ def measure_gen(ndim, time, basis="random", measurements=100):
         The measurement basis - random/fourier - to use.
     
     measurements : int
-        Number of measurements to use for compressive sampling transform
+        Number of measurements to use for compressive sampling transform.
+
+    freqs : list (float)
+        The range of frequencies to sample when using fourier basis. 
 
     Returns
     -------
@@ -479,29 +486,29 @@ def measure_gen(ndim, time, basis="random", measurements=100):
         # measurement period)
 
         # generate random frequencies or use those in freq list
-        rand_flag = len(self.opt_params["freqs"]) < self.opt_params["measurements"]
+        rand_flag = len(freqs) < measurements
         # create storage container for selected indices
         if not rand_flag:
             rand_ints = []
 
         meas_freq = []
-        for i in range(self.opt_params["measurements"]):
+        for i in range(measurements):
             if rand_flag:
                 # choose a random frequency over the given range
-                freq = (self.opt_params["freqs"][1] - self.opt_params["freqs"][0])*np.random.ranf()+self.opt_params["freqs"][0]
+                freq = (freqs[1] - freqs[0])*np.random.ranf()+freqs[0]
             else:
                 # choose a random frequency in the provided set and save index of chosen int
-                randint = np.random.randint(low=0, high=len(self.opt_params["freqs"]))
+                randint = np.random.randint(low=0, high=len(freqs))
                 # ensure frequency has not been chosen before (inefficient but in the scheme of things, unimportant)
-                while randint in self.rand_ints:
-                    randint = np.random.randint(low=0, high=len(self.opt_params["freqs"]))
+                while randint in rand_ints:
+                    randint = np.random.randint(low=0, high=len(freqs))
                 # save chosen frequency
-                self.rand_ints.append(randint)
+                rand_ints.append(randint)
                 # add to set
-                freq = self.opt_params["freqs"][randint]
+                freq = freqs[randint]
             # add frequency to selection
-            self.opt_params["meas_freq"].append(freq)
-            transform[i, :] = -np.sin(2*np.pi*freq*self.t) #np.imag(np.exp(-1j*2*np.pi*freq*self.t))
+            meas_freq.append(freq)
+            transform[i, :] = -np.sin(2*np.pi*freq*time) #np.imag(np.exp(-1j*2*np.pi*freq*self.t))
 
     else:
         print("unknown measurement basis specified: exiting ")
