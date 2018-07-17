@@ -18,7 +18,7 @@ np.random.seed(4321)
 time, signal, template = sparse_gen(events=3, freq=1e12, fs=4e12, t=1e-9, plot=False)
 
 # define a measurement basis (random or fourier)
-transform = measure_gen(ovector=signal, time=time, basis="random")
+transform = measure_gen(mdim=len(signal), time=time, basis="random")
 
 # compute the signal that would be measured given the above original
 # and measurement basis

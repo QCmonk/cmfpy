@@ -7,6 +7,10 @@ import scipy.sparse as sp
 from decimal import Decimal
 import matplotlib.pyplot as plt
 
+# TODO
+# adaptive template update preprocess
+# threshold limit for spike matching
+
 
 
 class CAOptimise(object):
@@ -190,7 +194,7 @@ class CAOptimise(object):
 
     def py_notch_match(self, osignal=None, max_spikes=1, plot=False):
         """
-        Applies the notched matched filter solution
+        Applies the notched matched filter to signal identification problem. 
 
         Parameters
         ----------
@@ -315,28 +319,18 @@ class CAOptimise(object):
 
     def plot_recon(self, original):
         """
-        
+        Plot function for comparing reconstructed signal and original. 
 
         Parameters
         ----------
-        first : array_like
-            the 1st param name `first`
-        second :
-            the 2nd param
-        third : {'value', 'other'}, optional
-            the 3rd param, by default 'value'
+        original : one dimensional numpy array
+            The original signal that is being reconstructed
 
         Returns
         -------
-        string
-            a value in a string
+        A plot window showing original signal and reconstruction super imposed on 
+        one another. 
 
-        Raises
-        ------
-        KeyError
-            when a key error
-        OtherError
-            when an other error
         """
         plt.plot(self.opt_params["time"], original, color="r", label='Original')
         plt.plot(self.opt_params["time"], self.u_recon, 'b--', label='Reconstruction')
@@ -347,33 +341,28 @@ class CAOptimise(object):
         plt.legend()
         plt.show()
 
-    # plot the results of the notched matched filter
-    def notch_match_plot(self, time):
+
+
+    def notch_match_plot(self, time, original):
         """
-        My numpydoc description of a kind
-        of very exhautive numpydoc format docstring.
+        Plots time events of signals using (only) notched filter approach and compares against original 
+        and notch function.
 
         Parameters
         ----------
-        first : array_like
-            the 1st param name `first`
-        second :
-            the 2nd param
-        third : {'value', 'other'}, optional
-            the 3rd param, by default 'value'
+        time : one dimensional numpy array
+            time vector (assumed to be time, doesn't have to be) of transform sample time
+
+        original : one dimensional numpy array
+            Original signal that is being reconstructed. 
 
         Returns
         -------
-        string
-            a value in a string
+        Plot of notch function, reconstruction and 
 
-        Raises
-        ------
-        KeyError
-            when a key error
-        OtherError
-            when an other error
+
         """
+
         fig, axx = plt.subplots(2, sharex=True)
         l1, = axx[0].plot(time, self.template_recon, 'g')
         axx[0].grid(True)
@@ -382,39 +371,48 @@ class CAOptimise(object):
                                                                                        self.opt_params["basis"],
                                                                                        self.opt_params["noise"], 
                                                                                        self.metrics["l2"]))                                     
-        l2, = axx[0].plot(time, self.svector, 'r')
+        l2, = axx[0].plot(time, original, 'r')
         #plt.legend([l1,l2], ["Reconstructed", "Original"])
         l3, = axx[1].plot(time, self.nuke, 'b')
         axx[1].grid(True)
         axx[1].set_xlabel("Time (s)")
         plt.show()
 
-# An example waveform that is sparse in time over a one second period
+
 def sparse_gen(events, freq, fs=4e3, t=10, plot=False):
     """
-    My numpydoc description of a kind
-    of very exhautive numpydoc format docstring.
+    Generates an example sparse signal for testing and demonstration purposes.
 
     Parameters
     ----------
-    first : array_like
-        the 1st param name `first`
-    second :
-        the 2nd param
-    third : {'value', 'other'}, optional
-        the 3rd param, by default 'value'
+    events : int
+        Number of events that should be randomly placed over signal period
+
+    freq : float
+        The frequency of the signal pulse that occurs at each event (identical for each)
+
+    fs : float
+        The sampling frequency of the original signal vector and sampling transform. Only relevant
+        for simulations such as this one - must be sufficiently high to capture event information 
+        however. 
+    
+    t : float
+        Total time of signal - longer times require more memory (or less measurements)
+
+    plot : boolean
+        Whether to plot the signal vector 
 
     Returns
     -------
-    string
-        a value in a string
+    time : one dimensional numpy array
+        The time vector used for signal and transform.
 
-    Raises
-    ------
-    KeyError
-        when a key error
-    OtherError
-        when an other error
+    signal : one dimensional numpy array
+        The generated sparse signal.
+
+    template : one dimensional numpy array
+        The signal template used for each event.
+
     """
 
     # define rectangular function centered at 0 with width equal to period
@@ -445,43 +443,37 @@ def sparse_gen(events, freq, fs=4e3, t=10, plot=False):
     return time, signal, template
 
 
-# generates desired measurement basis set with given parameters
-def measure_gen(ovector, time, basis="random", measurements=100):
+def measure_gen(ndim, time, basis="random", measurements=100):
     """
-    My numpydoc description of a kind
-    of very exhautive numpydoc format docstring.
+    Generates desired measurement basis set with given parameters.
 
     Parameters
     ----------
-    first : array_like
-        the 1st param name `first`
-    second :
-        the 2nd param
-    third : {'value', 'other'}, optional
-        the 3rd param, by default 'value'
+    ndim : int
+        The dimension of the original signal vector (number of time samples).
+
+    time : one dimensional numpy array
+        The time vector for the original signal vector.
+
+    basis : str
+        The measurement basis - random/fourier - to use.
+    
+    measurements : int
+        Number of measurements to use for compressive sampling transform
 
     Returns
     -------
-    string
-        a value in a string
+    transform : numpy array
+        An measurements*ndim array with basis measurements sorted row wise such that transform*signal = svector  
 
-    Raises
-    ------
-    KeyError
-        when a key error
-    OtherError
-        when an other error
     """
 
-    # store signal vector dimension
-    mdim = len(ovector)
-
     if basis == "random":
-        transform = 2*np.random.ranf(size=(measurements, mdim))-1
+        transform = 2*np.random.ranf(size=(measurements, ndim))-1
 
     elif basis == "fourier":
         # pre-allocate transform matrix
-        transform = np.zeros((measurements, mdim), dtype=float)
+        transform = np.zeros((measurements, ndim), dtype=float)
 
         # predefine measurement steps (we always assume a one second
         # measurement period)
