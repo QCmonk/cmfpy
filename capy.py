@@ -130,22 +130,19 @@ class CAOptimise(object):
             The original signal that is being reconstruced, used for fidelity testing
         
         plot : Boolean  
-            the 2nd param
-        third : {'value', 'other'}, optional
-            the 3rd param, by default 'value'
+            Whether to plot the autocorrelation function and osignal if 
+            provided.
 
         Returns
         -------
-        string
-            a value in a string
+        The correlation function h(tau).
 
         Raises
         ------
-        KeyError
-            when a key error
-        OtherError
-            when an other error
+        AttributeError
+            if no template for matching has been provided
         """
+
         # ensure a template has been provided
         if self.opt_params["template"] is None:
             raise(AttributeError, "No template provided for matched filter")
@@ -189,34 +186,36 @@ class CAOptimise(object):
                 plt.grid(True)
                 plt.show()
 
+        return correlation
 
-    # performs multi-event compressive sampling
     def py_notch_match(self, osignal=None, max_spikes=1, plot=False):
         """
-        My numpydoc description of a kind
-        of very exhautive numpydoc format docstring.
+        Applies the notched matched filter solution
 
         Parameters
         ----------
-        first : array_like
-            the 1st param name `first`
-        second :
-            the 2nd param
-        third : {'value', 'other'}, optional
-            the 3rd param, by default 'value'
+        osignal: one dimensional numpy array
+            The original signal, only required for comparison plotting
+        
+        max_spikes : int
+            The number of spikes to reconstruct (soon to be changed to threshold)
+        
+        plot : boolean
+            Whether to plot the matched filter results. If osignal is supplied
+            this will compare them, else it will just plot the reconstruction. 
 
         Returns
         -------
-        string
-            a value in a string
+        notch: one dimensional numpy array
+            a vector with the template placed at the identified time events
 
         Raises
         ------
-        KeyError
-            when a key error
-        OtherError
-            when an other error
+        AttributeError
+            If no template has been provided. 
+        
         """
+        
         # ensure a template has been provided
         if self.opt_params["template"] is None:
             raise(AttributeError, "No template provided for matched filter")
@@ -278,33 +277,26 @@ class CAOptimise(object):
                 plt.grid(True)
                 plt.show()
 
+        return self.notch
 
-    # shifts signal vector by tau
+
     def sig_shift(self, template, tau_int):
         """
-        My numpydoc description of a kind
-        of very exhautive numpydoc format docstring.
+        Shifts a template by tau_int indexes to the right. 
 
         Parameters
         ----------
-        first : array_like
-            the 1st param name `first`
-        second :
-            the 2nd param
-        third : {'value', 'other'}, optional
-            the 3rd param, by default 'value'
+        template : one dimensional numpy array
+            The template to use for reconstruction.
+
+        tau_int : int
+            The index to insert the template at. 
 
         Returns
         -------
-        string
-            a value in a string
+        shift: one dimensional numpy array
+            An all zero vector with template at tau_int.
 
-        Raises
-        ------
-        KeyError
-            when a key error
-        OtherError
-            when an other error
         """
 
         # create zeroed vector
@@ -320,10 +312,10 @@ class CAOptimise(object):
 
         return shift
 
+
     def plot_recon(self, original):
         """
-        My numpydoc description of a kind
-        of very exhautive numpydoc format docstring.
+        
 
         Parameters
         ----------
